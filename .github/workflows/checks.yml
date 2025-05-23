@@ -12,29 +12,40 @@ jobs:
 
       - name: Debug Secrets
         run: |
-          echo "DOCKERHUB_USER is set to: ${{ secrets.DOCKERHUB_USER }}"
+          echo "DOCKERHUB_USER: '${{ secrets.DOCKERHUB_USER }}'"
           echo "DOCKERHUB_TOKEN length: $(echo -n ${{ secrets.DOCKERHUB_TOKEN }} | wc -c)"
-          echo "Secrets available: $(env | grep DOCKERHUB)"
+          echo "DOCKERHUB_TOKEN first 4 chars (for format check): $(echo -n ${{ secrets.DOCKERHUB_TOKEN }} | head -c 4)"
+          echo "Secrets available: $(env | grep DOCKERHUB || echo 'No DOCKERHUB vars found')"
+          # Check for non-printable characters
+          echo "DOCKERHUB_USER hex: $(echo -n ${{ secrets.DOCKERHUB_USER }} | xxd)"
+          echo "DOCKERHUB_TOKEN hex: $(echo -n ${{ secrets.DOCKERHUB_TOKEN }} | xxd | head -n 1)"
         env:
           DOCKERHUB_USER: ${{ secrets.DOCKERHUB_USER }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Check Docker Version
+      - name: Trim Secrets and Manual Login
+        run: |
+          # Trim any whitespace from secrets
+          TRIMMED_USER=$(echo -n "${{ secrets.DOCKERHUB_USER }}" | tr -d '[:space:]')
+          TRIMMED_TOKEN=$(echo -n "${{ secrets.DOCKERHUB_TOKEN }}" | tr -d '[:space:]')
+          echo "Trimmed username: $TRIMMED_USER"
+          echo "Trimmed token length: $(echo -n $TRIMMED_TOKEN | wc -c)"
+          # Attempt login with trimmed credentials
+          echo "$TRIMMED_TOKEN" | docker login -u "$TRIMMED_USER" --password-stdin
+        continue-on-error: true
+
+      - name: Check Docker Environment
         run: |
           docker --version
           docker info --format '{{.ClientInfo}}'
-
-      - name: Manual Docker Login
-        run: |
-          echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USER }}" --password-stdin
-        continue-on-error: true  # Allow workflow to continue even if this fails
+          docker info --format '{{.RegistryConfig}}'
 
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USER }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-        continue-on-error: true  # Allow workflow to continue for debugging
+        continue-on-error: true
 
       - name: Test
         run: docker compose run --rm app sh -c "python manage.py test"
